@@ -1,1 +1,1 @@
-glidingrat.github.io/bitcube/
+[Vyzkoušet](https://glidingrat.github.io/bitcube/)
