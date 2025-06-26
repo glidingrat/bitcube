@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Falling BTC Cubes</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #0d0d0d;
+      font-family: sans-serif;
+      color: white;
+    }
+    #stats {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 10;
+      user-select: none;
+    }
+    #supportToggle {
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 16px;
+    }
+    #qrCodes {
+      margin-top: 10px;
+      display: none;
+    }
+    #qrcode {
+      width: 150px;
+      height: 150px;
+    }
+    #txLogContainer {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    #toggleTxLog {
+      margin-bottom: 6px;
+      cursor: pointer;
+      padding: 6px 12px;
+      background: #222;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      font-size: 14px;
+    }
+    #txLog {
+      width: 300px;
+      max-height: 90vh;
+      overflow-y: auto;
+      overflow-x: hidden; 
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 8px;
+      word-wrap: break-word; 
+    }
+    .txItem {
+      background: rgba(255,255,255,0.1);
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      animation: fadeOut 12s ease-out forwards;
+      word-break: break-word; 
+    }
+    .txItem.large {
+      background: rgba(255,215,0,0.2);
+      font-weight: bold;
+      border: 1px solid gold;
+    }
+    @keyframes fadeOut {
+      0% { opacity: 1; transform: translateY(0); }
+      90% { opacity: 1; transform: translateY(0); }
+      100% { opacity: 0; transform: translateY(-20px); }
+    }
+  </style>
+</head>
+<body>
+  <div id="stats">
+    <div id="supportToggle">Support me</div>
+    <div id="qrCodes">
+      <div id="qrcode"></div>
+    </div>
+  </div>
+
+  <div id="txLogContainer">
+    <button id="toggleTxLog">Show/Hide Transactions</button>
+    <div id="txLog"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+  <script src="https://unpkg.com/three@0.148.0/build/three.min.js"></script>
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.148.0/build/three.module.js';
+    import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
+
+    const lightningURI = 'lno1pgqppmsrse80qf0aara4slvcjxrvu6j2rp5ftmjy4yntlsmsutpkvkt6878sypef79k09fthtqyp0l059y03pt6x9zeyk0cnz6d8c8x5zau0zl53qgpl22d8px84uxa6wr3sd75ma8ej9zjs3h7228f30fxn5lrw37amdrcqxvhtcxjt6kf3l30ahnqplnd37dnz58ygyyptvlnhku59mzxcruyyw8u7dcqexu7r0kxgxaalyxyjmjsa8reqymvjd2s0v8lsgxz79ku3wj9ueva2f6txxqmt447g4dhezd6m3hc3qqepe3tf727n9as2503kv4tctwrjzct9gmd6sts4npazlkd9nz6su9tcxzdgq42vktchlng4t52248vr2k9s';
+
+    const qrContainer = document.getElementById('qrcode');
+    QRCode.toDataURL(lightningURI, { width: 150 }, function (error, url) {
+      if (error) {
+        console.error(error);
+        return;
+      }
+      qrContainer.innerHTML = `<img src="${url}" alt="Lightning QR code" />`;
+    });
+
+    let scene = new THREE.Scene();
+    let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    let renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    camera.position.set(0, 15, 25);
+    camera.lookAt(0, 0, 0);
+
+    scene.add(new THREE.AmbientLight(0x404040));
+    const light = new THREE.PointLight(0xffffff, 1.5);
+    light.position.set(10, 25, 25);
+    scene.add(light);
+
+    const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+
+    const floorGeo = new THREE.BoxGeometry(30, 1, 30);
+    const floorMat = new THREE.MeshPhongMaterial({ color: 0x222222 });
+    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    floorMesh.position.y = -0.5;
+    scene.add(floorMesh);
+
+    const floorBody = new CANNON.Body({
+      mass: 0,
+      shape: new CANNON.Box(new CANNON.Vec3(15, 0.5, 15)),
+      position: new CANNON.Vec3(0, -0.5, 0)
+    });
+    world.addBody(floorBody);
+
+    let objects = [];
+
+    function spawnCube(valueBTC) {
+      const baseSize = 1.0;
+      const maxSize = 6.0;
+      let size = baseSize * Math.log10(valueBTC * 10 + 1);
+      size = Math.min(Math.max(size, 0.4), maxSize);
+
+      const color = new THREE.Color(`hsl(${Math.random() * 360}, 70%, 50%)`);
+      const geometry = new THREE.BoxGeometry(size, size, size);
+      const material = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 1 });
+      const mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = 256;
+      canvas.height = 128;
+      ctx.fillStyle = "white";
+      ctx.font = "bold 32px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${valueBTC.toFixed(4)} BTC`, canvas.width / 2, canvas.height / 2);
+      const texture = new THREE.CanvasTexture(canvas);
+      const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+      const label = new THREE.Sprite(spriteMaterial);
+      label.scale.set(size * 3, size * 1.5, 1);
+      scene.add(label);
+
+      let spawnRange = valueBTC > 1 ? 5 : 12.5;
+      let posX = (Math.random() - 0.5) * spawnRange * 2;
+      let posZ = (Math.random() - 0.5) * spawnRange * 2;
+
+      const shape = new CANNON.Box(new CANNON.Vec3(size / 2, size / 2, size / 2));
+      const body = new CANNON.Body({
+        mass: size,
+        shape: shape,
+        position: new CANNON.Vec3(posX, 30, posZ)
+      });
+
+      let speedMultiplier = valueBTC > 1 ? 0.7 : 1.5;
+      const angle = Math.random() * Math.PI * 2;
+      body.velocity.x = Math.cos(angle) * speedMultiplier;
+      body.velocity.z = Math.sin(angle) * speedMultiplier;
+
+      const minLife = 3;
+      const maxLife = 12;
+      const normValue = Math.min(1, Math.log10(valueBTC * 1e8 + 1) / 8);
+      const lifeTime = minLife + (maxLife - minLife) * normValue;
+
+      objects.push({ mesh, body, label, birthTime: performance.now() / 1000, lifeTime, fading: false, removeTime: 0 });
+      world.addBody(body);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      world.step(1 / 60);
+      const now = performance.now() / 1000;
+
+      for (let i = objects.length - 1; i >= 0; i--) {
+        const obj = objects[i];
+        obj.mesh.position.copy(obj.body.position);
+        obj.mesh.quaternion.copy(obj.body.quaternion);
+
+        obj.label.position.set(
+          obj.body.position.x,
+          obj.body.position.y + obj.mesh.geometry.parameters.height / 2 + obj.label.scale.y / 2,
+          obj.body.position.z
+        );
+        obj.label.quaternion.copy(camera.quaternion);
+
+        const age = now - obj.birthTime;
+
+        if (!obj.fading && age > obj.lifeTime) {
+          obj.fading = true;
+          obj.removeTime = now + 2;
+        }
+
+        if (obj.fading) {
+          obj.mesh.material.opacity = Math.max(0, obj.mesh.material.opacity - 0.02);
+          obj.label.material.opacity = obj.mesh.material.opacity;
+          if (now >= obj.removeTime || obj.mesh.material.opacity <= 0) {
+            world.removeBody(obj.body);
+            scene.remove(obj.mesh);
+            scene.remove(obj.label);
+            objects.splice(i, 1);
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    const supportToggle = document.getElementById('supportToggle');
+    const qrCodes = document.getElementById('qrCodes');
+    const toggleTxLogBtn = document.getElementById('toggleTxLog');
+    const txLog = document.getElementById('txLog');
+
+    let txLogVisible = false;
+
+    toggleTxLogBtn.addEventListener('click', () => {
+      txLogVisible = !txLogVisible;
+      txLog.style.display = txLogVisible ? 'flex' : 'none';
+    });
+
+    supportToggle.addEventListener('click', () => {
+      qrCodes.style.display = (qrCodes.style.display === 'none' || qrCodes.style.display === '') ? 'block' : 'none';
+    });
+
+    const ws = new WebSocket("wss://ws.blockchain.info/inv");
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ op: "unconfirmed_sub" }));
+    };
+
+    ws.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+      const tx = data.x;
+      const value = tx.out.reduce((sum, out) => sum + out.value, 0) / 1e8;
+      spawnCube(value);
+
+      const div = document.createElement("div");
+      div.className = "txItem";
+      if (value > 1) div.classList.add("large");
+
+      const time = new Date(tx.time * 1000).toLocaleTimeString();
+      const firstAddr = tx.out[0]?.addr || "Unknown";
+      const shortHash = tx.hash.slice(0, 10) + "...";
+
+      div.innerHTML = `
+        <strong>${value.toFixed(5)} BTC</strong> @ ${time}<br>
+        <small>To: ${firstAddr}</small><br>
+        <small>Outputs: ${tx.out.length} | Hash: ${shortHash}</small>
+      `;
+
+      txLog.prepend(div);
+
+      setTimeout(() => {
+        if (txLog.contains(div)) txLog.removeChild(div);
+      }, 12000);
+    };
+
+    ws.onerror = () => {
+      console.error("WebSocket error.");
+    };
+
+    ws.onclose = () => {
+      console.warn("WebSocket closed.");
+    };
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
